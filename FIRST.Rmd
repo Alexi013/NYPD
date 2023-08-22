@@ -1,0 +1,259 @@
+---
+title: "NYPD Shooting Report"
+Author: "Alexi Salazar"
+date: "2023-08-22"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Import Libraries
+
+```{r}
+library(tidyverse)
+```
+
+## Read Data In
+
+```{r load}
+df = read_csv("https://data.cityofnewyork.us/api/views/833y-fsy8/rows.csv?accessType=DOWNLOAD")
+```
+
+```{r}
+head(df)
+```
+
+## Tidy Data
+
+Looking at the columns from the previous head(df), we are able to determine columns we will not be utilizing for this assignment. These columns are **PRECINCT** , **JURISDICTION_CODE**, **LOCATION_DESC** , **X_COORD_CD** , **Y_COORD_CD** , **LOC_OF_OCCUR_DESC** , **LOCATION_CLASSFCTN_DESC** , **Latitude**, **Longitude** and **Lon_Lat** .
+
+```{r}
+df_2 = df %>% select(INCIDENT_KEY, 
+                   OCCUR_DATE,
+                   OCCUR_TIME,
+                   BORO, 
+                   STATISTICAL_MURDER_FLAG,
+                   PERP_AGE_GROUP,
+                   PERP_SEX,
+                   PERP_RACE,
+                   VIC_AGE_GROUP,
+                   VIC_SEX,
+                   VIC_RACE)
+```
+
+```{r}
+lapply(df_2, function(x) sum(is.na(x)))
+```
+
+Looking over the returned values, we are able to tell that there is missing data from a handful of columns. We can understand a sense of ambiguity in the race, sex and age of the perpetrator that could be present in possibly ongoing and active investigations. To address these gaps of information, we will be calling these occurrences "Unknown" as to avoid potentially mishandling meaningful data.
+
+```{r}
+unique(df_2$PERP_AGE_GROUP)
+df_2 = df_2 %>% 
+  replace_na(list(PERP_AGE_GROUP = "Unknown", PERP_SEX = "Unknown", PERP_RACE = "Unknown"))
+
+df_2 = subset(df_2, PERP_AGE_GROUP!="1020" & PERP_AGE_GROUP!="224" & PERP_AGE_GROUP!="940" & VIC_AGE_GROUP != "1022")
+
+df_2$PERP_AGE_GROUP = recode(df_2$PERP_AGE_GROUP, UNKNOWN = "Unknown")
+df_2$PERP_SEX = recode(df_2$PERP_SEX, U = "Unknown")
+df_2$PERP_RACE = recode(df_2$PERP_RACE, UNKNOWN = "Unknown")
+df_2$VIC_SEX   = recode(df_2$VIC_SEX, U = "Unknown")
+df_2$VIC_RACE   = recode(df_2$VIC_RACE, UNKNOWN = "Unknown")
+df_2$INCIDENT_KEY = as.character(df_2$INCIDENT_KEY)
+df_2$BORO = as.factor(df_2$BORO)
+df_2$PERP_AGE_GROUP = as.factor(df_2$PERP_AGE_GROUP)
+df_2$PERP_SEX = as.factor(df_2$PERP_SEX)
+df_2$PERP_RACE = as.factor(df_2$PERP_RACE)
+df_2$VIC_AGE_GROUP = as.factor(df_2$VIC_AGE_GROUP)
+df_2$VIC_SEX = as.factor(df_2$VIC_SEX)
+df_2$VIC_RACE = as.factor(df_2$VIC_RACE)
+
+summary(df_2)
+```
+
+After looking at the summary of our new data under df_2, we can peer into any potentially extreme data and take action. Similarly, we can address data that is missing, such as the **AMERICAN INDIAN/ALASKAN NATIVE** category from **PERP_RACE**.
+
+```{r}
+df_2$PERP_AGE_GROUP[df_2$PERP_AGE_GROUP == "(null)"] <- "Unknown"
+race_sex_levels <- c("F", "M", "Unknown")
+
+df_2$PERP_AGE_GROUP = recode(df_2$PERP_AGE_GROUP, UNKNOWN = "Unknown")
+
+df_2$PERP_RACE <- case_when(
+  df_2$PERP_RACE %in% c("(null)", NA) ~ "Unknown",
+  TRUE ~ df_2$PERP_RACE
+)
+
+df_2$PERP_SEX <- case_when(
+  df_2$PERP_SEX %in% c("(null)", NA) ~ "Unknown",
+  TRUE ~ df_2$PERP_SEX
+)
+df_2$PERP_SEX = factor(df_2$PERP_SEX, levels = race_sex_levels)
+df_2$PERP_RACE = factor(df_2$PERP_RACE, levels = levels(df_2$VIC_RACE))
+summary(df_2)
+```
+
+We now have the data properly sorted and accounted for, we can move onto analysis!
+
+## Incidents and Murder by Borough
+
+With the data we want cleaned and transformed,we can begin to ask questions and create visualizations to help with our analysis.
+
+I first wanted to ask, what borough has the most amount of incidents, and further see how many murders there are in proportion to the incidents.
+
+```{r}
+df_2 %>%
+  group_by(BORO) %>%
+  summarize(
+    Incident_Count = n(),                       # Count of incidents
+    Murder_Count = sum(STATISTICAL_MURDER_FLAG) # Count of murders
+  ) %>%
+  pivot_longer(cols = c(Incident_Count, Murder_Count),
+               names_to = "Type",
+               values_to = "Count") %>%
+  ggplot(aes(x = BORO, y = Count, fill = Type)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  labs(title = "Incidents and Murders by Borough", y = "Count", x = "Borough") +
+  scale_fill_manual(values = c("Incident_Count" = "blue", "Murder_Count" = "red")) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    legend.position = "top",
+    legend.title = element_blank()
+  )
+```
+
+We are able to see that among the New York boroughs, Brooklyn by far has the most incident count as well as having the highest murder count with Staten Island coming in last with the fewest incident count murder count.
+
+This led to another question of, who are the people making up these incidents and murders.
+
+```{r}
+table(df_2$PERP_AGE_GROUP, df_2$BORO)
+table(df_2$VIC_AGE_GROUP, df_2$BORO)
+```
+
+```{r}
+table(df_2$PERP_RACE, df_2$BORO)
+table(df_2$VIC_RACE, df_2$BORO)
+```
+
+```{r}
+density_data <- df_2 %>%
+  group_by(BORO, PERP_RACE) %>%
+  summarize(density = n()) %>%
+  ungroup()
+
+# Create a heatmap showing the density of different races within each boro
+heatmap_plot1 <- ggplot(density_data, aes(x = BORO, y = PERP_RACE, fill = density)) +
+  geom_tile(width = 0.9, height = 0.9) +
+  labs(title = "Density of Perp Race by Boro",
+       x = "Boro", y = "Perp Race", fill = "Density") +
+  scale_fill_distiller(palette = "Spectral", direction = -1,
+                       breaks = seq(0, max(density_data$density), by = 1000)) +  # Adjust the breaks
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# Show the heatmap
+print(heatmap_plot1)
+
+density_data <- df_2 %>%
+  group_by(BORO, VIC_RACE) %>%
+  summarize(density = n()) %>%
+  ungroup()
+
+# Create a heatmap showing the density of different races within each boro
+heatmap_plot2 <- ggplot(density_data, aes(x = BORO, y = VIC_RACE, fill = density)) +
+  geom_tile(width = 0.9, height = 0.9) +
+  labs(title = "Density of Vic Race by Boro",
+       x = "Boro", y = "Vic Race", fill = "Density") +
+  scale_fill_distiller(palette = "Spectral", direction = -1,
+                       breaks = seq(0, max(density_data$density), by = 1000)) +  # Adjust the breaks
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# Show the heatmap
+print(heatmap_plot2)
+```
+
+The heat maps show us a heavy density of perpetrators among the Unknown group, with black and both of the Hispanic groups also having the highest occurrences. Interestingly, the Unknown group does not have the highest Victim occurrence as seen in the perpetrator map, but instead is heavy in the Back group.
+
+```{r}
+density_data <- df_2 %>%
+  group_by(BORO, PERP_AGE_GROUP) %>%
+  summarize(density = n()) %>%
+  ungroup()
+
+# Create a heatmap showing the density of different ages within each boro
+heatmap_plot3 <- ggplot(density_data, aes(x = BORO, y = PERP_AGE_GROUP, fill = density)) +
+  geom_tile(width = 0.9, height = 0.9) +
+  labs(title = "Density of Perpetrator Age by Borough",
+       x = "Borough", y = "Perpetrator Age", fill = "Density") +
+  scale_fill_distiller(palette = "Spectral", direction = -1,
+                       breaks = seq(0, max(density_data$density), by = 1000)) +  # Adjust the breaks
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# Show the heatmap
+print(heatmap_plot3)
+
+density_data <- df_2 %>%
+  group_by(BORO, VIC_AGE_GROUP) %>%
+  summarize(density = n()) %>%
+  ungroup()
+
+# Create a heatmap showing the density of different ages within each boro
+heatmap_plot4 <- ggplot(density_data, aes(x = BORO, y = VIC_AGE_GROUP, fill = density)) +
+  geom_tile(width = 0.9, height = 0.9) +
+  labs(title = "Density of Vic Age by Borough",
+       x = "Borough", y = "Victim Age", fill = "Density") +
+  scale_fill_distiller(palette = "Spectral", direction = -1,
+                       breaks = seq(0, max(density_data$density), by = 1000)) +  # Adjust the breaks
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# Show the heatmap
+print(heatmap_plot4)
+
+
+```
+
+We are able to determine that the highest density of perpetrators is once again seen within the Unknown group, with 25-44 and 18-24 following. Similarly to the race map explored above, the Unknown group falls in terms of occurrence and 25-44 and 18-24 rise in density of occurrence when investigating victims.
+
+As mentioned while we were tidying our data, this large disparity of Unknowns among both age groups and race could be attributed to unsolved and on going investigations where the perpetrator may still not be known. This supports why when exploring the victim data we have a drop in Unknown occurrences, as they are probably the ones reporting the crime and are able to provide information about themselves.
+
+##Logistic Regression Model We can create a regression model to help predict responses based off of certain arameters, in our case we will be creating a logistic regression model estimating the log odds that a murder will take place in the particular Borough, particular perpetrator profile, time or date.
+
+```{r}
+df_2$OCCUR_DAY = mdy(df_2$OCCUR_DATE)
+df_2$OCCUR_DAY = wday(df_2$OCCUR_DAY, label = TRUE)
+df_2$OCCUR_HOUR = hour(hms(as.character(df_2$OCCUR_TIME)))
+
+df_3 = df_2 %>%
+  group_by(OCCUR_DAY) %>%
+  count()
+
+df_4 = df_2 %>%
+  group_by(OCCUR_HOUR) %>%
+  count()
+
+glm.fit <- glm(STATISTICAL_MURDER_FLAG ~ PERP_RACE + PERP_SEX + PERP_AGE_GROUP + OCCUR_HOUR + OCCUR_DAY + BORO, data = df_2, family = binomial)
+summary(glm.fit)
+```
+
+From the model, we can notice the small increases of log odds from the race of the perpetrator really not highlighting a certain group of people. Another interesting point from the model, age group 65+ has the highest log odds of any of the age groups, I immediately thought this could come down to who their victims could be and possibly they are having incidents with other people around their similar age and any sort of physical violent attack could increase the chance of murder.
+
+The model definitely brings up many interesting questions that could be asked to only introduce more analysis, but would require much more data and research to properly address.
+
+## Identifying Bias
+
+Dealing with data always carries the threat of ones bias showing through in how data is handled and interpreted. I personally did not have any clear biases in relation to New York and its boroughs, but I definitely do when data comes from police that really stems from controversy on over policing that occurs in communities with high Black and Hispanic communities. An article written by nyclu titled "A CLOSER LOOK AT STOP-AND-FRISK IN NYC" really shows the proportion in which people of color are targeted when being stopped and frisked. While very hard to prove any sort of bias or injustice in the data source as well as myself, I believe a good path forward over policed be to look into the demographics of boroughs to see if that data could further support the notion that people of color are over policed when compared to their white counterparts. Again, this brings its own trouble of making sure I am not harboring any bias to try and prove people of color are being over policed.
+
+## Resources
+
+-   [NYPD Shooting Incident Data (Historic)] - (<https://catalog.data.gov/dataset/nypd-shooting-incident-data-historic>)
+
+-   [A CLOSER LOOK AT STOP-AND-FRISK IN NYC - NYCLU] - (<https://www.nyclu.org/en/closer-look-stop-and-frisk-nyc>)
